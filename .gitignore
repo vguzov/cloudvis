@@ -1,0 +1,8 @@
+.idea/
+.DS_store
+*.pyc
+.data/
+build/
+dist/
+cloudvis.egg-info/
+

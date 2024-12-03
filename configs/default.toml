@@ -1,0 +1,48 @@
+camera_fov = 60.0
+resolution = [1280, 720]
+viewport_resolution = [1280, 720]
+fps_limit = 60.0
+
+[scenes]
+scenes_dir = "./data/scenes"
+pointclouds_dir = "./data/pointclouds"
+
+[humans]
+smpl_motions_dir = "./data/human/smpl_motions"
+smpl_shapes_dir = "./data/human/smpl_shapes"
+smpl_root = "./data/human/smplx_models"
+smpl_contacts_dir = "./data/human/contacts"
+#smpl_template = ""
+#smpl_texture = ""
+#smpl_templates_dir = ""
+no_smpl_template = true
+load_with_height_corr = false
+
+[videos]
+videos_dir = "./data/videos/rgb"
+kinrec_dir = "./data/videos/kinrec"
+kinects_dir = "./data/videos/kinects"
+kinects_calibration_dir = "./data/videos/kinects_calibration"
+
+
+[objects]
+object_masks_dir = "./data/object/masks"
+object_locations_dir = "./data/object/locations"
+objloc_fps = 29.92
+
+[capturing]
+screen_capture_dir = "./data/screenshots"
+trajectory_dir = "./data/trajectories"
+take_screenshot = false
+exit_on_videorec_stop = false
+
+[preload]
+#preload = ""
+nobkg = false
+nosmpl = false
+noobj = false
+
+[misc]
+continuous_redraw = false
+#obj_mask_override = ""
+#smpl_shape_override = ""
