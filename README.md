@@ -1,5 +1,5 @@
 # CloudVis - Interactive Visualizer for Point Clouds, Meshes and more
-An interactive pointcloud and mesh visualizer with video recording capabilities.
+An interactive pointcloud and mesh visualizer with recording capabilities.
 Based on [cloudrender](https://github.com/vguzov/cloudrender) rendering framework.
 
 ## Main features:

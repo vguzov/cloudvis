@@ -670,6 +670,8 @@ class InteractiveViewer:
 
     def replace_smpl_template(self, template_path, smpl_model: Union[SMPLXColoredModel, SMPLXTexturedModel], texture_path=None,
             height_correction_override=None):
+        if template_path is None:
+            return
         status_line = StatusTextLine(f"Loading template {os.path.basename(template_path)}")
         self.gui_controller.status_text.append(status_line)
         self.redraw_gui()
@@ -731,9 +733,15 @@ class InteractiveViewer:
             poses_path_ext = ".json.zip"
         sub_prefix = seq_prefix.split("_")[0]
         if self.config.misc.smpl_shape_override is None:
-            betas_path = os.path.join(self.config.humans.smpl_shapes_dir, sub_prefix + ".json")
+            if self.config.humans.smpl_shapes_dir is None:
+                betas_path = None
+            else:
+                betas_path = os.path.join(self.config.humans.smpl_shapes_dir, sub_prefix + ".json")
         else:
             betas_path = self.config.misc.smpl_shape_override
+
+        ## Contacts information loading
+
         contacts_path = os.path.join(self.config.humans.smpl_contacts_dir, seq_prefix + ".json")
         if os.path.isfile(contacts_path):
             self.contacts_db[seq_prefix] = json.load(open(contacts_path))
@@ -754,13 +762,59 @@ class InteractiveViewer:
             self.contacts_db[seq_prefix] = {"contacts": {"left_hand": np.zeros((0, 2)), "right_hand": np.zeros((0, 2))}}
             self.contacts_db[seq_prefix]["type"] = "intervals"
 
+        ## Main sequence loading
+
         status_line = StatusTextLine(f"Loading sequence {seq_prefix}")
         self.gui_controller.status_text.append(status_line)
         self.redraw_gui()
 
-        smpl_shape_params = json.load(open(betas_path))
-        smpl_gender = smpl_shape_params['gender']
-        smpl_betas = np.array(smpl_shape_params["betas"])
+        if betas_path is not None and os.path.isfile(betas_path):
+            smpl_shape_params = json.load(open(betas_path))
+            smpl_gender = smpl_shape_params['gender']
+            smpl_betas = np.array(smpl_shape_params["betas"])
+        else:
+            smpl_gender = None
+            smpl_betas = None
+
+        ## Pose sequence loading
+
+        flat_hand_mean = False
+        if poses_path_ext in [".json", ".json.zip"]:
+            if poses_path_ext == ".json.zip":
+                fbx_motion_seq = zipjson.load(open(poses_path, "rb"))
+            else:
+                fbx_motion_seq = json.load(open(poses_path))
+            if isinstance(fbx_motion_seq, list):
+                old_style_fbx_seq = True
+                fbx_timestamps = np.array([x['time'] for x in fbx_motion_seq])
+                fbx_motion_seq = [{k: np.array(v) for k, v in x.items()} for x in fbx_motion_seq]
+            else:
+                old_style_fbx_seq = False
+                if "betas" in fbx_motion_seq["global"]:
+                    betas = np.array(fbx_motion_seq["global"]["betas"])
+                else:
+                    betas = np.zeros(10)
+                gender = fbx_motion_seq["global"]["gender"]
+                if "model_type" in fbx_motion_seq["global"]:
+                    smpl_type = fbx_motion_seq["global"]["model_type"]
+                if smpl_gender is None:
+                    smpl_gender = gender
+                    smpl_betas = betas
+                fbx_motion_seq = [{k: np.array(v) for k, v in x.items()} for x in fbx_motion_seq["sequence"]]
+                fbx_timestamps = np.array([x['time'] for x in fbx_motion_seq])
+                flat_hand_mean = "right_hand_pose" in fbx_motion_seq[0]
+                logger.debug(f"flat_hand_mean is {flat_hand_mean}")
+            if self.config.humans.load_wo_tr:
+                # Make transl zero:
+                for i in range(len(fbx_motion_seq)):
+                    fbx_motion_seq[i]["transl"] = np.zeros(3)
+            if smpl_gender is None:
+                smpl_gender = 'male' # some model types don't have neutral gender, safer to default to male
+        else:
+            raise ValueError(f"Unknown extension {poses_path_ext}")
+
+
+        ## Template and texture loading
 
         template_path = self.template_path
         model_texture_path = self.model_texture_path
@@ -776,6 +830,7 @@ class InteractiveViewer:
             model_texture_path = None
 
         if template_path is not None:
+            assert smpl_gender is not None
             new_pickle = pkl.load(open(template_path, "rb"), encoding='latin1')
             template = new_pickle["v"]
             corr_vct = self.get_template_correction_vct(smpl_gender, smpl_betas, template, smpl_type,
@@ -797,34 +852,12 @@ class InteractiveViewer:
         else:
             model_class = SMPLXTexturedModel
 
-        flat_hand_mean = False
-        if poses_path_ext in [".json", ".json.zip"]:
-            if poses_path_ext == ".json.zip":
-                fbx_motion_seq = zipjson.load(open(poses_path, "rb"))
-            else:
-                fbx_motion_seq = json.load(open(poses_path))
-            if isinstance(fbx_motion_seq, list):
-                old_style_fbx_seq = True
-                fbx_timestamps = np.array([x['time'] for x in fbx_motion_seq])
-                fbx_motion_seq = [{k: np.array(v) for k, v in x.items()} for x in fbx_motion_seq]
-            else:
-                old_style_fbx_seq = False
-                betas = np.array(fbx_motion_seq["global"]["betas"])
-                gender = fbx_motion_seq["global"]["gender"]
-                fbx_motion_seq = [{k: np.array(v) for k, v in x.items()} for x in fbx_motion_seq["sequence"]]
-                fbx_timestamps = np.array([x['time'] for x in fbx_motion_seq])
-                flat_hand_mean = "right_hand_pose" in fbx_motion_seq[0]
-                logger.debug(f"flat_hand_mean is {flat_hand_mean}")
-            if self.config.humans.load_wo_tr:
-                # Make transl zero:
-                for i in range(len(fbx_motion_seq)):
-                    fbx_motion_seq[i]["transl"] = np.zeros(3)
-            renderable_smpl = model_class(camera=self.camera, gender=smpl_gender,
-                                          smpl_root=self.smpl_root, template=template,  # global_offset=offset,
-                                          model_type=smpl_type, center_root_joint=True,
-                                          flat_hand_mean=flat_hand_mean, global_offset=corr_vct)
-        else:
-            raise ValueError(f"Unknown extension {poses_path_ext}")
+        ## Model creation
+
+        renderable_smpl = model_class(camera=self.camera, gender=smpl_gender,
+                                      smpl_root=self.smpl_root, template=template,  # global_offset=offset,
+                                      model_type=smpl_type, center_root_joint=True,
+                                      flat_hand_mean=flat_hand_mean, global_offset=corr_vct)
 
         if template_path is not None:
             renderable_smpl.template_path = template_path
@@ -901,7 +934,7 @@ class InteractiveViewer:
         self.scene.add_object(renderable_smpl)
         self.timed_renderables.append(renderable_smpl)
         self.smpl_models.append(renderable_smpl)
-        self.camera_modes_available += {"relative", "first_person"}
+        self.camera_modes_available |= {"relative", "first_person"}
         self.gui_controller.status_text.remove(status_line)
 
     def apply_current_camera(self):
@@ -1036,7 +1069,7 @@ class InteractiveViewer:
             self.load_smpl_model(model_desc['poses_path'], height_correction_override=height_correction_on_templates)
             if 'color' in model_desc and model_desc["color"] is not None:
                 self.smpl_models[-1].set_uniform_color(model_desc['color'])
-            if "template_path" in model_desc and not self.config.humans.no_smpl_template:
+            if "template_path" in model_desc and model_desc["template_path"] is not None and not self.config.humans.no_smpl_template:
                 self.replace_smpl_template(model_desc["template_path"], self.smpl_models[-1],
                                            model_desc["texture_path"] if "texture_path" in model_desc else None,
                                            height_correction_override=height_correction_on_templates)
